@@ -143,21 +143,22 @@ class WebTorrent extends EventEmitter {
                     } else {
                         console.warn('SOCKS Proxy must be version 5 with no authentication to work in electron-wrtc -> WebRTC is disabled')
                         this.tracker.wrtc = false
-                        networkSettingsReady(null)
+                        networkSettingsReady(null, 1)
                     }
                 } else {
-                    networkSettingsReady(null)
+                    networkSettingsReady(null, 2)
                 }
             } else {
-                networkSettingsReady(null)
+                networkSettingsReady(null, 3)
             }
 
         } else {
-            networkSettingsReady(null)
+            networkSettingsReady(null, 4)
         }
 
 
-        function networkSettingsReady(err) {
+        function networkSettingsReady(err, i = 0) {
+            console.log('access ' + i)
             if (err) {
                 this._destroy(err)
             }
