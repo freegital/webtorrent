@@ -108,38 +108,87 @@ class WebTorrent extends EventEmitter {
       up: new ThrottleGroup({ rate: this.uploadLimit })
     }
 
-    if (typeof TCPPool === 'function') {
-      this._tcpPool = new TCPPool(this)
-    } else {
-      process.nextTick(() => {
-        this._onListening()
-      })
+      // Proxy
+  self.proxyOpts = opts.proxyOpts
+  if (self.proxyOpts) {
+    self.proxyOpts.proxyTrackerConnections = self.proxyOpts.proxyTrackerConnections !== false
+    self.proxyOpts.proxyPeerConnections = self.proxyOpts.proxyPeerConnections !== false
+
+    if (self.tracker && self.proxyOpts.proxyTrackerConnections && !self.tracker.proxyOpts) {
+      self.tracker.proxyOpts = self.proxyOpts
     }
 
-    // stats
-    this._downloadSpeed = speedometer()
-    this._uploadSpeed = speedometer()
+    var socksProxy = self.proxyOpts.socksProxy
+    if (socksProxy) {
+      if (!socksProxy.proxy) socksProxy.proxy = {}
+      if (!socksProxy.proxy.type) socksProxy.proxy.type = 5
 
-    if (opts.dht !== false && typeof DHT === 'function' /* browser exclude */) {
+      // Ensure electron-wrtc is used in electron with socks proxy
+      if (self.tracker && self.proxyOpts.proxyPeerConnections &&
+        process && process.versions['electron'] &&
+        self.tracker.wrtc && !self.tracker.wrtc.electronDaemon) {
+        console.warn('You need to provide an electron-wrtc instance in opts.wrtc to use Socks proxy in electron -> WebRTC is disabled')
+          self.tracker.wrtc = false
+      }
+
+      // Convert proxy opts to electron API in webtorrent-hybrid
+      if (self.tracker && self.tracker.wrtc && self.tracker.wrtc.electronDaemon &&
+          socksProxy && self.proxyOpts.proxyPeerConnections) {
+        if (!socksProxy.proxy.authentication && !socksProxy.proxy.userid && socksProxy.proxy.type === 5) {
+          var electronConfig = {
+            proxyRules: 'socks' + socksProxy.proxy.type + '://' + socksProxy.proxy.ipAddress + ':' + socksProxy.proxy.port
+          }
+          self.tracker.wrtc.electronDaemon.eval('window.webContents.session.setProxy(' +
+                JSON.stringify(electronConfig) + ', function(){})', {mainProcess: true}, networkSettingsReady)
+        } else {
+          console.warn('SOCKS Proxy must be version 5 with no authentication to work in electron-wrtc -> WebRTC is disabled')
+          self.tracker.wrtc = false
+          networkSettingsReady(null)
+        }
+      } else {
+        networkSettingsReady(null)
+      }
+    } else {
+      networkSettingsReady(null)
+    }
+        
+    } else {
+      networkSettingsReady(null)
+    }
+
+    
+    function networkSettingsReady (err) {
+    if (err) {
+      self._destroy(err)
+    }
+
+
+      if (typeof TCPPool === 'function') {
+      self._tcpPool = new TCPPool(self)
+    } else {
+      process.nextTick(function () {
+        self._onListening()
+      })
+    }
+      
+      
+      // stats
+    self._downloadSpeed = speedometer()
+    self._uploadSpeed = speedometer()
+      
+      if (opts.dht !== false && typeof DHT === 'function' /* browser exclude */) {
       // use a single DHT instance for all torrents, so the routing table can be reused
-      this.dht = new DHT(Object.assign({}, { nodeId: this.nodeId }, opts.dht))
+      self.dht = new DHT(extend({nodeId: self.nodeId}, opts.dht))
 
-      this.dht.once('error', err => {
-        this._destroy(err)
+        
+        self.dht.once('error', function (err) {
+        self._destroy(err)
       })
-
-      this.dht.once('listening', () => {
-        const address = this.dht.address()
-        if (address) this.dhtPort = address.port
+        
+              self.dht.once('listening', function () {
+        var address = self.dht.address()
+        if (address) self.dhtPort = address.port
       })
-
-      // Ignore warning when there are > 10 torrents in the client
-      this.dht.setMaxListeners(0)
-
-      this.dht.listen(this.dhtPort)
-    } else {
-      this.dht = false
-    }
 
     // Enable or disable BEP19 (Web Seeds). Enabled by default:
     this.enableWebSeeds = opts.webSeeds !== false
@@ -149,6 +198,16 @@ class WebTorrent extends EventEmitter {
       this.ready = true
       this.emit('ready')
     }
+    
+    // Ignore warning when there are > 10 torrents in the client
+      self.dht.setMaxListeners(0)
+
+      self.dht.listen(self.dhtPort)
+    } else {
+      self.dht = false
+    }
+
+    debug('new webtorrent (peerId %s, nodeId %s)', self.peerId, self.nodeId)
 
     if (typeof loadIPSet === 'function' && opts.blocklist != null) {
       loadIPSet(opts.blocklist, {
